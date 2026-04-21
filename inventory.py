@@ -27,7 +27,7 @@ class Inventory:
     def get_low_stock(self, threshold: int = 5) -> list[str]:
         """Return items with stock at or below the threshold."""
         # BUG: uses < instead of <= so items exactly at threshold are missed
-        return [name for name, item in self.items.items() if item["quantity"] < threshold]
+        return [name for name, item in self.items.items() if item["quantity"] <= threshold]
 
     def total_value(self) -> float:
         """Return the total value of all inventory."""
