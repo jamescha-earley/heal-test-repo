@@ -1,50 +1,49 @@
 # heal-test-repo
 
-A deliberately buggy Python module used to test [code-healer](https://github.com/jamescha-earley/code-healer) -- an autonomous bug-fixing agent built with the Cortex Code Agent SDK.
+A deliberately buggy Snowflake data pipeline project used to test [code-healer](https://github.com/jamescha-earley/code-healer) -- an autonomous bug-fixing agent built with the Cortex Code Agent SDK.
 
-## The Bug
+## Project Structure
 
-`inventory.py` contains a simple inventory management class. The `get_low_stock` method has an off-by-one error:
+- `query_builder.py` -- SQL query builders for Snowflake (`MERGE INTO`, `COPY INTO`, `GRANT`)
+- `pipeline.py` -- `StagingPipeline` orchestrator (load -> deduplicate -> merge -> validate)
+- `test_pipeline.py` -- Tests that verify generated SQL correctness (no Snowflake connection needed)
 
-```python
-def get_low_stock(self, threshold: int = 5) -> list[str]:
-    """Return items with stock at or below the threshold."""
-    # BUG: uses < instead of <= so items exactly at threshold are missed
-    return [name for name, item in self.items.items() if item["quantity"] < threshold]
-```
+## The Bugs
 
-The docstring says "at or below", but the implementation uses `<` instead of `<=`, so items exactly at the threshold are excluded.
+### Bug 1: MERGE updates join keys (`query_builder.py`)
 
-`test_inventory.py` includes a test that catches this:
+`MergeBuilder.build()` includes join key columns in the `UPDATE SET` clause. Snowflake rejects this -- you can't update columns used in the `ON` clause.
 
-```python
-def test_low_stock():
-    inv = Inventory()
-    inv.add_item("a", 3, 1.00)   # below threshold
-    inv.add_item("b", 5, 1.00)   # exactly at threshold -- should be included!
-    inv.add_item("c", 10, 1.00)  # above threshold
-    low = inv.get_low_stock(threshold=5)
-    assert "b" in low, "Item 'b' (qty=5) should be low stock (at threshold)"
-```
+### Bug 2: Stage paths with spaces aren't quoted (`query_builder.py`)
 
-## How code-healer fixes it
+`CopyIntoBuilder._quote_stage()` detects spaces but returns the path unquoted. Snowflake requires single quotes around stage paths containing special characters.
 
-1. Issue [#1](https://github.com/jamescha-earley/heal-test-repo/issues/1) describes the bug
-2. code-healer fetches the issue, clones this repo, and spins up a team of three Cortex Code subagents:
-   - **Investigator** -- reads the codebase, runs tests, identifies root cause
-   - **Fixer** -- changes `<` to `<=` in `get_low_stock`
-   - **Reviewer** -- verifies the fix and checks for regressions
-3. A PR is submitted with a full explanation: [PR #3](https://github.com/jamescha-earley/heal-test-repo/pull/3)
+### Bug 3: Deduplication deletes originals instead of duplicates (`pipeline.py`)
 
-The whole process takes about 10 seconds.
+`StagingPipeline.deduplicate_sql()` uses `QUALIFY row_num = 1` which selects the *original* rows for deletion. It should use `QUALIFY row_num > 1` to target duplicates.
 
-## Running tests
+### Bug 4: Validation rejects exact threshold matches (`pipeline.py`)
+
+`StagingPipeline.validate_result()` uses `>` instead of `>=`, so a row count exactly equal to the expected minimum fails validation.
+
+## Running Tests
 
 ```bash
-python test_inventory.py
+python test_pipeline.py
 ```
 
-Before the fix, `test_low_stock` fails. After the fix (`<` changed to `<=`), all tests pass.
+4 of 9 tests will fail, each catching one of the bugs above.
+
+## How code-healer Fixes It
+
+When a new issue is opened on this repo, GitHub Actions triggers the Code Healer workflow:
+
+1. code-healer fetches the issue, clones this repo, and spins up a team of three Cortex Code subagents:
+   - **Investigator** -- reads the codebase, runs tests, identifies root cause
+   - **Fixer** -- applies targeted code changes
+   - **Reviewer** -- verifies the fix and checks for regressions
+2. A PR is submitted with a full explanation (root cause, fix, confidence level)
+3. The issue gets a comment linking to the PR
 
 ## Related
 
