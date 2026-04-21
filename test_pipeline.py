@@ -62,9 +62,11 @@ def test_copy_into_quotes_stage_with_spaces():
     )
     sql = builder.build()
 
-    # The stage path should be quoted
-    assert "'" in sql.split("FROM")[1], (
-        f"Stage path with spaces should be quoted, but got: {sql}"
+    # The FROM line should have the stage path wrapped in single quotes
+    from_line = [l for l in sql.splitlines() if l.startswith("FROM")][0]
+    assert "'" in from_line, (
+        f"Stage path with spaces should be quoted on the FROM line, "
+        f"but got: {from_line}"
     )
 
 
