@@ -33,7 +33,7 @@ class MergeBuilder:
         )
 
         # BUG: should exclude join keys from update columns, but doesn't
-        update_cols = self.columns
+        update_cols = [c for c in self.columns if c not in self.join_keys]
         update_set = ", ".join(f"target.{c} = source.{c}" for c in update_cols)
 
         insert_cols = ", ".join(self.columns)
@@ -71,7 +71,7 @@ class CopyIntoBuilder:
         """Quote the stage path if it contains spaces or special characters."""
         # BUG: only checks for spaces but doesn't actually quote -- returns as-is
         if " " in stage:
-            return stage  # should be f"'{stage}'"
+            return f"'{stage}'"
         return stage
 
     def build(self) -> str:
