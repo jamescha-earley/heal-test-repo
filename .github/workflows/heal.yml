@@ -1,10 +1,8 @@
 # Code Healer -- Auto-fix bugs on new issues
 #
-# When a new issue is opened, this workflow:
-#   1. Checks out the code
-#   2. Runs the Code Healer agent to analyze and fix the bug
-#   3. Creates a PR with the fix
-#   4. Comments on the issue with the result
+# Triggers:
+#   1. When a new issue is opened (manual or external)
+#   2. When CI workflow fails (auto-created issues from test failures)
 #
 # Prerequisites:
 #   - SNOWFLAKE_CONFIG repo secret must contain a valid connections.toml for Cortex CLI auth
@@ -15,10 +13,17 @@ name: Code Healer
 on:
   issues:
     types: [opened]
+  workflow_run:
+    workflows: ["CI"]
+    types: [completed]
 
 jobs:
   heal:
     runs-on: ubuntu-latest
+    # Run on new issues, or when CI failed (skip if CI passed)
+    if: >
+      github.event_name == 'issues' ||
+      (github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'failure')
     permissions:
       contents: write
       issues: write
@@ -28,22 +33,46 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v5
 
+      - name: Find issue number
+        id: find-issue
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          if [ "${{ github.event_name }}" = "issues" ]; then
+            echo "number=${{ github.event.issue.number }}" >> "$GITHUB_OUTPUT"
+          else
+            # Find the most recent open CI-created issue
+            NUMBER=$(gh issue list --repo "$GITHUB_REPOSITORY" --state open \
+              --search "CI: test failures" --json number --jq '.[0].number // empty')
+            if [ -z "$NUMBER" ]; then
+              echo "No open CI issue found -- skipping."
+              echo "number=" >> "$GITHUB_OUTPUT"
+            else
+              echo "Found CI issue #$NUMBER"
+              echo "number=$NUMBER" >> "$GITHUB_OUTPUT"
+            fi
+          fi
+
       - name: Set up Python
+        if: steps.find-issue.outputs.number != ''
         uses: actions/setup-python@v6
         with:
           python-version: '3.12'
 
       - name: Run Code Healer
+        if: steps.find-issue.outputs.number != ''
         uses: jamescha-earley/code-healer@main
         id: healer
         with:
-          issue-number: ${{ github.event.issue.number }}
+          issue-number: ${{ steps.find-issue.outputs.number }}
           snowflake-config: ${{ secrets.SNOWFLAKE_CONFIG }}
           snowflake-connection: devrel
 
       - name: Summary
+        if: steps.find-issue.outputs.number != ''
         run: |
           echo "### Code Healer Results" >> $GITHUB_STEP_SUMMARY
+          echo "- **Issue**: #${{ steps.find-issue.outputs.number }}" >> $GITHUB_STEP_SUMMARY
           echo "- **Status**: ${{ steps.healer.outputs.status }}" >> $GITHUB_STEP_SUMMARY
           echo "- **PR**: ${{ steps.healer.outputs.pr-url }}" >> $GITHUB_STEP_SUMMARY
           echo "- **Confidence**: ${{ steps.healer.outputs.confidence }}" >> $GITHUB_STEP_SUMMARY
