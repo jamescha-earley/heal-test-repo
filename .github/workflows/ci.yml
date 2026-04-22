@@ -1,0 +1,76 @@
+# CI -- Run tests on push and PR, auto-create issue on failure
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    permissions:
+      issues: write
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+
+      - name: Install pytest
+        run: pip install pytest
+
+      - name: Run tests
+        id: tests
+        continue-on-error: true
+        run: |
+          python -m pytest test_pipeline.py -v --tb=short 2>&1 | tee test_output.txt
+          echo "exit_code=${PIPESTATUS[0]}" >> "$GITHUB_OUTPUT"
+
+      - name: Create issue on failure
+        if: steps.tests.outputs.exit_code != '0' && github.event_name == 'push'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RUN_ID: ${{ github.run_id }}
+        run: |
+          # Extract failed test names and short summary
+          FAILURES=$(grep -E "^FAILED" test_output.txt || true)
+          SUMMARY=$(tail -1 test_output.txt)
+
+          # Check for existing open issue to avoid duplicates
+          EXISTING=$(gh issue list --repo "$GITHUB_REPOSITORY" --state open \
+            --search "CI: test failures in test_pipeline.py" \
+            --json number --jq '.[0].number // empty')
+
+          if [ -n "$EXISTING" ]; then
+            echo "Open issue #$EXISTING already exists -- skipping."
+            exit 0
+          fi
+
+          # Write issue body to a temp file to avoid shell quoting problems
+          {
+            echo "Tests are failing on \`main\`. Below is the pytest output:"
+            echo ""
+            echo '```'
+            cat test_output.txt
+            echo '```'
+            echo ""
+            echo "**Failed tests:**"
+            echo "$FAILURES"
+            echo ""
+            echo "**Summary:** $SUMMARY"
+            echo ""
+            echo "_Auto-created by CI workflow -- run ${RUN_ID}_"
+          } > issue_body.md
+
+          gh issue create \
+            --repo "$GITHUB_REPOSITORY" \
+            --title "CI: test failures in test_pipeline.py" \
+            --body-file issue_body.md
+
+      - name: Fail if tests failed
+        if: steps.tests.outputs.exit_code != '0'
+        run: exit 1
