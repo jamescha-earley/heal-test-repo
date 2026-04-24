@@ -71,7 +71,7 @@ class StagingPipeline:
             f"      ) AS row_num\n"
             f"    FROM {self.staging_table}\n"
             f"  )\n"
-            f"  QUALIFY row_num = 1\n"
+            f"  QUALIFY row_num > 1\n"
             f")"
         )
 
@@ -101,7 +101,7 @@ class StagingPipeline:
         the expected minimum.
         """
         # BUG: uses > instead of >= so exact matches fail validation
-        return row_count > expected_minimum
+        return row_count >= expected_minimum
 
     def run_all_sql(self) -> list[str]:
         """Return all pipeline SQL statements in execution order."""
