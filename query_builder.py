@@ -13,9 +13,9 @@ class MergeBuilder:
             f"target.{k} = source.{k}" for k in self.join_keys
         )
 
-        # BUG: includes join keys in UPDATE SET (Snowflake will error)
+        # FIX: exclude join keys from UPDATE SET (Snowflake rejects updating join columns)
         update_cols = ", ".join(
-            f"{col} = source.{col}" for col in self.columns
+            f"{col} = source.{col}" for col in self.columns if col not in self.join_keys
         )
 
         insert_cols = ", ".join(self.columns)
@@ -38,15 +38,22 @@ class CopyIntoBuilder:
         self.pattern = pattern
 
     def build(self) -> str:
-        # BUG: doesn't quote stage paths with spaces
+        # FIX: quote stage paths with spaces or special characters
+        stage_path = self._quote_stage(self.stage)
         lines = [
             f"COPY INTO {self.table}",
-            f"FROM {self.stage}",
+            f"FROM {stage_path}",
             f"FILE_FORMAT = (TYPE = '{self.file_format}')",
         ]
         if self.pattern:
             lines.append(f"PATTERN = '{self.pattern}'")
         return "\n".join(lines)
+
+    def _quote_stage(self, stage: str) -> str:
+        """Quote stage path if it contains spaces or special characters."""
+        if " " in stage or any(c in stage for c in ["(", ")", "[", "]"]):
+            return f"'{stage}'"
+        return stage
 
 
 class GrantBuilder:
