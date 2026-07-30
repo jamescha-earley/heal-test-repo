@@ -15,7 +15,7 @@ class StagingPipeline:
     def deduplicate_sql(self) -> str:
         """Generate SQL to remove duplicate rows from staging."""
         partition_cols = ", ".join(self.join_keys)
-        # BUG: deletes originals (row_num = 1) instead of duplicates (row_num > 1)
+        # FIX: delete duplicates (row_num > 1) instead of originals (row_num = 1)
         return (
             f"DELETE FROM {self.staging_table}\n"
             f"WHERE rowid IN (\n"
@@ -25,14 +25,14 @@ class StagingPipeline:
             f"    ) AS row_num\n"
             f"    FROM {self.staging_table}\n"
             f"  )\n"
-            f"  WHERE row_num = 1\n"
+            f"  WHERE row_num > 1\n"
             f")"
         )
 
     def validate_result(self, row_count: int, expected_minimum: int) -> bool:
         """Check if load result meets minimum threshold."""
-        # BUG: uses > instead of >= (fails at exact boundary)
-        return row_count > expected_minimum
+        # FIX: use >= to accept exact threshold matches
+        return row_count >= expected_minimum
 
     def run_all_sql(self) -> list[str]:
         """Generate all pipeline SQL statements in order."""
